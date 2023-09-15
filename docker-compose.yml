@@ -1,0 +1,11 @@
+version: "2.1"
+services:
+  postDB:
+    image: 'postgres:latest'
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=Password1234
+    volumes:
+      - ./database.sql:/docker-entrypoint-initdb.d/create_tables.sql
+    ports:
+      - "5432:5432"
