@@ -3,14 +3,14 @@
   <nav>
     <ul>
       {{ if .User }}
-      <li><a href="/profile">{{ .User.Username }}</a></li>
+      <li><a href="/">{{ .User.Username }}</a></li>
       <li>
         <form action="/logout" method="post">
           <input type="submit" name="logout" value="Logout" />
         </form>
       </li>
       {{ else }}
-      <li><a href="/login">Log In</a></li>
+      <li><a href="/signin">Log In</a></li>
       {{ end }}
     </ul>
   </nav>

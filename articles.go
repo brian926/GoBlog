@@ -15,6 +15,12 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+type Article struct {
+	ID      int           `json:"id"`
+	Title   string        `json:"title"`
+	Content template.HTML `json:"content"`
+}
+
 func UploadHandler(w http.ResponseWriter, r *http.Request) {
 	const MAX_UPLOAD_SIZE = 10 << 20
 	r.Body = http.MaxBytesReader(w, r.Body, MAX_UPLOAD_SIZE)
