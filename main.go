@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/jwtauth"
 	"github.com/joho/godotenv"
+	"github.com/lestrrat-go/jwx/jwt"
 	_ "github.com/lib/pq"
 )
 
@@ -27,6 +28,14 @@ type Article struct {
 	Content template.HTML `json:"content"`
 }
 
+type User struct {
+	Username string
+}
+
+type PageData struct {
+	User *User
+}
+
 func catch(err error) {
 	if err != nil {
 		fmt.Println(err)
@@ -37,6 +46,48 @@ func catch(err error) {
 func MakeToken(name string) string {
 	_, tokenString, _ := tokenAuth.Encode(map[string]interface{}{"username": name})
 	return tokenString
+}
+
+func LoggedInRedirector(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token, _, _ := jwtauth.FromContext(r.Context())
+
+		if token != nil && jwt.Validate(token) == nil {
+			http.Redirect(w, r, "/", http.StatusFound)
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func UnloggedInRedirector(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token, _, _ := jwtauth.FromContext(r.Context())
+
+		if token == nil || jwt.Validate(token) != nil {
+			http.Redirect(w, r, "/signin", http.StatusFound)
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func ParseTemplates(r *http.Request, templates []string) (*template.Template, *PageData) {
+	_, claims, _ := jwtauth.FromContext(r.Context())
+
+	tmpl := template.Must(template.ParseFiles(templates...))
+
+	data := &PageData{
+		User: nil,
+	}
+
+	if claims["username"] != nil {
+		data.User = &User{
+			Username: claims["username"].(string),
+		}
+	}
+
+	return tmpl, data
 }
 
 func init() {
@@ -62,17 +113,16 @@ func router() http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(jwtauth.Verifier(tokenAuth))
 
+		r.Use(UnloggedInRedirector)
+
 		r.Post("/upload", UploadHandler)
-		r.Route("/articles", func(r chi.Router) {
-			r.Get("/", NewArticle)
-			r.Post("/", CreateArticle)
-			r.Route("/{articleID}", func(r chi.Router) {
-				r.Use(ArticleCtx)
-				r.Put("/", UpdateArticle)    // PUT /articles/1234
-				r.Delete("/", DeleteArticle) // DELETE /articles/1234
-				r.Get("/edit", EditArticle)  // GET /articles/1234/edit
-			})
-		})
+	})
+
+	r.Group(func(r chi.Router) {
+		r.Use(jwtauth.Verifier(tokenAuth))
+
+		r.Use(LoggedInRedirector)
+
 		r.Post("/signin", func(w http.ResponseWriter, r *http.Request) {
 			r.ParseForm()
 			userName := r.PostForm.Get("username")
@@ -94,24 +144,51 @@ func router() http.Handler {
 				Name:  "jwt", // Must be named "jwt" or else the token cannot be searched for by jwtauth.Verifier.
 				Value: token,
 			})
+
+			http.Redirect(w, r, "/", http.StatusSeeOther)
 		})
 	})
 
-	// Public Routes
-	r.Get("/", GetAllArticles)
+	// Public Route
 	r.Get("/images/*", ServeImages) // Add this
+	r.Get("/", GetAllArticles)
+
 	r.Route("/articles", func(r chi.Router) {
+		// Private
+		r.Group(func(r chi.Router) {
+			r.Use(jwtauth.Verifier(tokenAuth))
+
+			r.Use(UnloggedInRedirector)
+			r.Get("/", NewArticle)
+			r.Post("/", CreateArticle)
+		})
 		r.Route("/{articleID}", func(r chi.Router) {
 			r.Use(ArticleCtx)
+			// Public Route
 			r.Get("/", GetArticle) // GET /articles/1234
+			// Private Routes
+			r.Group(func(r chi.Router) {
+				r.Use(jwtauth.Verifier(tokenAuth))
+
+				r.Use(UnloggedInRedirector)
+
+				r.Put("/", UpdateArticle)    // PUT /articles/1234
+				r.Delete("/", DeleteArticle) // DELETE /articles/1234
+				r.Get("/edit", EditArticle)  // GET /articles/1234/edit
+			})
 		})
 	})
 
-	// r.Post("/signin", Signin)
-	// r.Get("/welcome", Welcome)
-	// r.Post("/refresh", Refresh)
-	// r.Post("/logout", Logout)
+	r.Group(func(r chi.Router) {
+		r.Use(jwtauth.Verifier(tokenAuth))
 
+		r.Use(LoggedInRedirector)
+		r.Get("/signin", func(w http.ResponseWriter, r *http.Request) {
+			tmpl, data := ParseTemplates(r, []string{"partials/navbar.html", "templates/signin.html"})
+
+			tmpl.ExecuteTemplate(w, "signin", data)
+		})
+	})
 	return r
 }
 
